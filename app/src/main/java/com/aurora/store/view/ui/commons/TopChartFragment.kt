@@ -1,139 +1,127 @@
-/*
- * Aurora Store
- *  Copyright (C) 2021, Rahul Kumar Patel <whyorean@gmail.com>
- *
- *  Aurora Store is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  Aurora Store is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Aurora Store.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package com.aurora.store.view.ui.commons
 
 import android.os.Bundle
 import android.view.View
+import android.widget.Toast
 import androidx.fragment.app.activityViewModels
-import com.aurora.Constants
-import com.aurora.gplayapi.data.models.StreamCluster
-import com.aurora.gplayapi.helpers.contracts.TopChartsContract.Chart
-import com.aurora.gplayapi.helpers.contracts.TopChartsContract.Type
-import com.aurora.store.TopChartStash
-import com.aurora.store.data.model.ViewState
-import com.aurora.store.data.model.ViewState.Empty.getDataAs
+import com.aurora.gplayapi.data.models.App
+import com.aurora.store.data.model.Download
 import com.aurora.store.databinding.FragmentTopContainerBinding
-import com.aurora.store.view.custom.recycler.EndlessRecyclerOnScrollListener
-import com.aurora.store.view.epoxy.views.AppProgressViewModel_
 import com.aurora.store.view.epoxy.views.app.AppListViewModel_
 import com.aurora.store.view.epoxy.views.shimmer.AppListViewShimmerModel_
 import com.aurora.store.viewmodel.topchart.TopChartViewModel
+import com.aurora.store.data.activity.InstallActivity
+import com.aurora.Constants
+import android.content.Intent
 import dagger.hilt.android.AndroidEntryPoint
+import okhttp3.*
+import org.json.JSONArray
+import java.io.IOException
 
 @AndroidEntryPoint
 class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
 
     private val viewModel: TopChartViewModel by activityViewModels()
-
-    private var streamCluster: StreamCluster? = StreamCluster()
-
-    companion object {
-        @JvmStatic
-        fun newInstance(chartType: Int, chartCategory: Int): TopChartFragment {
-            return TopChartFragment().apply {
-                arguments = Bundle().apply {
-                    putInt(Constants.TOP_CHART_TYPE, chartType)
-                    putInt(Constants.TOP_CHART_CATEGORY, chartCategory)
-                }
-            }
-        }
-    }
+    private val client = OkHttpClient()
+    
+    // الرابط المباشر لملف الـ JSON الخاص بك على GitHub
+    private val JSON_URL = "https://raw.githubusercontent.com/abdullah14120/Update/main/apps.json"
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        var type = 0
-        var category = 0
-        val bundle = arguments
-
-        if (bundle != null) {
-            type = bundle.getInt(Constants.TOP_CHART_TYPE, 0)
-            category = bundle.getInt(Constants.TOP_CHART_CATEGORY, 0)
-        }
-
-        val chartType = when (type) {
-            1 -> Type.GAME
-            else -> Type.APPLICATION
-        }
-
-        val chartCategory = when (category) {
-            1 -> Chart.TOP_GROSSING
-            2 -> Chart.MOVERS_SHAKERS
-            3 -> Chart.TOP_SELLING_PAID
-            else -> Chart.TOP_SELLING_FREE
-        }
-
-        binding.recycler.addOnScrollListener(object : EndlessRecyclerOnScrollListener() {
-            override fun onLoadMore(currentPage: Int) {
-                viewModel.nextCluster(chartType, chartCategory)
-            }
-        })
-
+        // 1. عرض الهيكل العظمي (Shimmer) أثناء التحميل
         updateController(null)
 
-        viewModel.getStreamCluster(chartType, chartCategory)
-        viewModel.liveData.observe(viewLifecycleOwner) {
-            when (it) {
-                is ViewState.Loading, is ViewState.Error -> {
-                    updateController(null)
+        // 2. جلب التطبيقات من مستودعك
+        loadMyApps()
+    }
+
+    private fun loadMyApps() {
+        val request = Request.Builder().url(JSON_URL).build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                activity?.runOnUiThread {
+                    Toast.makeText(context, "فشل جلب البيانات من السيرفر", Toast.LENGTH_SHORT).show()
                 }
+            }
 
-                is ViewState.Success<*> -> {
-                    val stash = it.getDataAs<TopChartStash>()
-                    streamCluster = stash[chartType]?.get(chartCategory)
-
-                    updateController(streamCluster)
+            override fun onResponse(call: Call, response: Response) {
+                response.body?.string()?.let { jsonString ->
+                    val myApps = parseJsonToAuroraApps(jsonString)
+                    activity?.runOnUiThread {
+                        updateController(myApps)
+                    }
                 }
+            }
+        })
+    }
 
-                else -> {}
+    private fun parseJsonToAuroraApps(json: String): List<App> {
+        val auroraApps = mutableListOf<App>()
+        try {
+            val jsonArray = JSONArray(json)
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+                val app = App().apply {
+                    id = i.toLong()
+                    title = item.getString("name")
+                    packageName = item.getString("package")
+                    versionName = item.getString("version")
+                    iconUrl = item.getString("icon")
+                    // تخزين رابط التحميل في متغير فرعي (متوفر في موديل App الخاص بـ Aurora)
+                    downloadUrl = item.getString("download_url")
+                }
+                auroraApps.add(app)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return auroraApps
+    }
+
+    private fun updateController(apps: List<App>?) {
+        binding.recycler.withModels {
+            if (apps == null) {
+                // عرض تأثير التحميل (Shimmer)
+                for (i in 1..8) {
+                    add(AppListViewShimmerModel_().id("shimmer_$i"))
+                }
+            } else {
+                apps.forEach { app ->
+                    add(
+                        AppListViewModel_()
+                            .id(app.packageName)
+                            .app(app)
+                            .click { _ -> 
+                                // عند الضغط، يتم استدعاء محرك التثبيت الصامت فوراً
+                                startDirectInstall(app)
+                            }
+                    )
+                }
             }
         }
     }
 
-    private fun updateController(streamCluster: StreamCluster?) {
-        binding.recycler.withModels {
-            setFilterDuplicates(true)
-            if (streamCluster == null) {
-                for (i in 1..6) {
-                    add(
-                        AppListViewShimmerModel_()
-                            .id(i)
-                    )
-                }
-            } else {
-                streamCluster.clusterAppList.forEach { app ->
-                    add(
-                        AppListViewModel_()
-                            .id(app.id)
-                            .app(app)
-                            .click { _ -> openDetailsFragment(app.packageName, app) }
-                    )
-                }
-
-                if (streamCluster.hasNext()) {
-                    add(
-                        AppProgressViewModel_()
-                            .id("progress")
-                    )
-                }
-            }
+    private fun startDirectInstall(app: App) {
+        activity?.runOnUiThread {
+            Toast.makeText(context, "بدأ تحميل وتثبيت: ${app.title}", Toast.LENGTH_LONG).show()
         }
+
+        // تحويل بيانات تطبيقك إلى "طلب تحميل" يفهمه نظام Aurora
+        val download = Download().apply {
+            packageName = app.packageName
+            downloadUrl = app.downloadUrl
+            name = app.title
+            iconUrl = app.iconUrl
+        }
+
+        // إرسال الطلب إلى InstallActivity لبدء التثبيت الصامت
+        val intent = Intent(requireContext(), com.aurora.store.data.activity.InstallActivity::class.java).apply {
+            putExtra(Constants.PARCEL_DOWNLOAD, download)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 }
