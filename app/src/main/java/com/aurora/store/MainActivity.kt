@@ -1,23 +1,3 @@
-/*
- * Aurora Store
- *  Copyright (C) 2021, Rahul Kumar Patel <whyorean@gmail.com>
- *  Copyright (C) 2022, The Calyx Institute
- *
- *  Aurora Store is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  Aurora Store is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Aurora Store.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package com.aurora.store
 
 import android.os.Bundle
@@ -39,7 +19,6 @@ import com.aurora.store.data.receiver.MigrationReceiver
 import com.aurora.store.databinding.ActivityMainBinding
 import com.aurora.store.util.PackageUtil
 import com.aurora.store.util.Preferences
-import com.aurora.store.util.Preferences.PREFERENCE_DEFAULT_SELECTED_TAB
 import com.aurora.store.view.ui.sheets.NetworkDialogSheet
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
@@ -51,29 +30,26 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private lateinit var binding: ActivityMainBinding
 
-    private lateinit var B: ActivityMainBinding
-
-    // TopLevelFragments
+    // جعلنا القائمة تحتوي فقط على شاشة تطبيقاتك والتحديثات
     private val topLevelFrags = listOf(
         R.id.appsContainerFragment,
-        R.id.gamesContainerFragment,
         R.id.updatesFragment
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Check and run migrations first if required
-        // This is needed thanks to OEMs breaking the MY_PACKAGE_REPLACED API
+        // تشغيل عمليات الهجرة إذا لزم الأمر
         MigrationReceiver.runMigrationsIfRequired(this)
 
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        B = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(B.root)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-        // Adjust root view's paddings for edgeToEdge display
-        ViewCompat.setOnApplyWindowInsetsListener(B.root) { root, windowInsets ->
+        // ضبط الحواف لعرض كامل الشاشة (Edge to Edge)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { root, windowInsets ->
             val insets = windowInsets.getInsets(systemBars() or displayCutout() or ime())
             root.setPadding(insets.left, insets.top, insets.right, 0)
             windowInsets
@@ -83,6 +59,7 @@ class MainActivity : AppCompatActivity() {
             supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as NavHostFragment
         val navController = navHostFragment.navController
 
+        // مراقبة حالة الشبكة
         if (!PackageUtil.isTv(this)) {
             viewModel.networkProvider.status.onEach { networkStatus ->
                 when (networkStatus) {
@@ -96,9 +73,7 @@ class MainActivity : AppCompatActivity() {
                                     .commitAllowingStateLoss()
                             }
                         }
-
                     }
-
                     NetworkStatus.UNAVAILABLE -> {
                         if (!supportFragmentManager.isDestroyed && isIntroDone()) {
                             supportFragmentManager.beginTransaction()
@@ -107,46 +82,36 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-            }.launchIn(AuroraApp.scope)
+            }.launchIn(lifecycleScope) // استخدام نطاق الحياة المناسب
         }
 
-        B.navView.setupWithNavController(navController)
+        // إعداد التنقل وإخفاء القائمة السفلية فوراً
+        binding.navView.setupWithNavController(navController)
+        binding.navView.visibility = View.GONE
 
-        // Handle quick exit from back actions
-        val defaultTab = when (Preferences.getInteger(this, PREFERENCE_DEFAULT_SELECTED_TAB)) {
-            1 -> R.id.gamesContainerFragment
-            2 -> R.id.updatesFragment
-            else -> R.id.appsContainerFragment
-        }
+        // تحديد شاشة تطبيقات عبد الله كوجهة افتراضية
+        val defaultTab = R.id.appsContainerFragment
+
+        // التعامل مع زر العودة لإغلاق التطبيق مباشرة من الصفحة الرئيسية
         onBackPressedDispatcher.addCallback(this) {
-            if (navController.currentDestination?.id in topLevelFrags) {
-                if (navController.currentDestination?.id == defaultTab) {
-                    finish()
-                } else {
-                    navController.navigate(defaultTab)
-                }
+            if (navController.currentDestination?.id == defaultTab) {
+                finish()
             } else if (navHostFragment.childFragmentManager.backStackEntryCount == 0) {
-                // We are on either on onboarding or splash fragment
                 finish()
             } else {
                 navController.navigateUp()
             }
         }
 
-        // Handle views on fragments
-        navController.addOnDestinationChangedListener { _, navDestination, _ ->
-            if (navDestination !is FloatingWindow) {
-                when (navDestination.id) {
-                    in topLevelFrags -> B.navView.visibility = View.VISIBLE
-                    else -> B.navView.visibility = View.GONE
-                }
-            }
+        // التأكد من أن القائمة السفلية تبقى مخفية في جميع الشاشات
+        navController.addOnDestinationChangedListener { _, _, _ ->
+            binding.navView.visibility = View.GONE
         }
 
-        // Updates
+        // تحديث إشعارات التحديثات (Badges) في الخلفية (اختياري طالما القائمة مخفية)
         lifecycleScope.launch {
             viewModel.updateHelper.updates.collectLatest { list ->
-                B.navView.getOrCreateBadge(R.id.updatesFragment).apply {
+                binding.navView.getOrCreateBadge(R.id.updatesFragment).apply {
                     isVisible = !list.isNullOrEmpty()
                     number = list?.size ?: 0
                 }
@@ -154,7 +119,5 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun isIntroDone(): Boolean {
-        return Preferences.getBoolean(this@MainActivity, Preferences.PREFERENCE_INTRO)
-    }
+    private fun isIntroDone(): Boolean = Preferences.getBoolean(this, Preferences.PREFERENCE_INTRO)
 }
