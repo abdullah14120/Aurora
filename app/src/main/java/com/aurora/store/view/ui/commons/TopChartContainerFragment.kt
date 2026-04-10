@@ -1,22 +1,3 @@
-/*
- * Aurora Store
- *  Copyright (C) 2021, Rahul Kumar Patel <whyorean@gmail.com>
- *
- *  Aurora Store is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  Aurora Store is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with Aurora Store.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package com.aurora.store.view.ui.commons
 
 import android.os.Bundle
@@ -35,17 +16,19 @@ import dagger.hilt.android.AndroidEntryPoint
 class TopChartContainerFragment : BaseFragment<FragmentTopChartBinding>() {
     companion object {
         @JvmStatic
-        fun newInstance(chartType: Int): TopChartContainerFragment {
-            return TopChartContainerFragment().apply {
+        fun newInstance(chartType: Int): TopChartContainerFragment =
+            TopChartContainerFragment().apply {
                 arguments = Bundle().apply {
                     putInt(Constants.TOP_CHART_TYPE, chartType)
                 }
             }
-        }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // 1. إخفاء أزرار التبديل العلوية (Top Free, Top Paid...) تماماً
+        binding.topTabGroup.visibility = View.GONE
 
         var chartType = 0
         val bundle = arguments
@@ -53,29 +36,12 @@ class TopChartContainerFragment : BaseFragment<FragmentTopChartBinding>() {
             chartType = bundle.getInt(Constants.TOP_CHART_TYPE, 0)
         }
 
-        // ViewPager
+        // 2. إعداد الـ ViewPager ليعرض صفحة واحدة فقط
         binding.pager.adapter =
             ViewPagerAdapter(childFragmentManager, viewLifecycleOwner.lifecycle, chartType)
-        binding.topTabGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            when (checkedIds[0]) {
-                R.id.tab_top_free -> binding.pager.setCurrentItem(0, true)
-                R.id.tab_top_grossing -> binding.pager.setCurrentItem(1, true)
-                R.id.tab_trending -> binding.pager.setCurrentItem(2, true)
-                R.id.tab_top_paid -> binding.pager.setCurrentItem(3, true)
-            }
-        }
-
-        binding.pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
-            override fun onPageSelected(position: Int) {
-                super.onPageSelected(position)
-                when (position) {
-                    0 -> binding.topTabGroup.check(R.id.tab_top_free)
-                    1 -> binding.topTabGroup.check(R.id.tab_top_grossing)
-                    2 -> binding.topTabGroup.check(R.id.tab_trending)
-                    3 -> binding.topTabGroup.check(R.id.tab_top_paid)
-                }
-            }
-        })
+        
+        // تعطيل السحب اليدوي بين الصفحات لضمان الثبات
+        binding.pager.isUserInputEnabled = false
     }
 
     override fun onDestroyView() {
@@ -87,21 +53,15 @@ class TopChartContainerFragment : BaseFragment<FragmentTopChartBinding>() {
         fragment: FragmentManager,
         lifecycle: Lifecycle,
         chartType: Int
-    ) :
-        FragmentStateAdapter(fragment, lifecycle) {
+    ) : FragmentStateAdapter(fragment, lifecycle) {
+        
+        // 3. جعل القائمة تحتوي على Fragment واحد فقط لعرض تطبيقاتك
         private val tabFragments: MutableList<TopChartFragment> = mutableListOf(
-            TopChartFragment.newInstance(chartType, 0),
-            TopChartFragment.newInstance(chartType, 1),
-            TopChartFragment.newInstance(chartType, 2),
-            TopChartFragment.newInstance(chartType, 3)
+            TopChartFragment.newInstance(chartType, 0) 
         )
 
-        override fun createFragment(position: Int): Fragment {
-            return tabFragments[position]
-        }
+        override fun createFragment(position: Int): Fragment = tabFragments[position]
 
-        override fun getItemCount(): Int {
-            return tabFragments.size
-        }
+        override fun getItemCount(): Int = 1 // واجهة واحدة فقط
     }
 }
