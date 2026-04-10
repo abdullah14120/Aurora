@@ -39,17 +39,13 @@ import dagger.hilt.android.AndroidEntryPoint
 import okhttp3.*
 import org.json.JSONArray
 import java.io.IOException
-import com.aurora.gplayapi.data.models.App
 
 @AndroidEntryPoint
 class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
 
     private val viewModel: TopChartViewModel by activityViewModels()
-    
     private val client = OkHttpClient()
-    
     private val JSON_URL = "https://raw.githubusercontent.com/abdullah14120/Update/main/apps.json"
-
     private var streamCluster: StreamCluster? = StreamCluster()
 
     companion object {
@@ -96,38 +92,21 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
         updateController(null)
 
         viewModel.getStreamCluster(chartType, chartCategory)
-        viewModel.liveData.observe(viewLifecycleOwner) }
-        val request = Request.Builder().url(JSON_URL).build()
-        client.newCall(request).enqueue(object : Callback {
-    override fun onFailure(call: Call, e: IOException) {
-        activity?.runOnUiThread { updateController(null) }
-    }
+        viewModel.liveData.observe(viewLifecycleOwner) {
+            when (it) {
+                is ViewState.Loading, is ViewState.Error -> {
+                    updateController(null)
+                }
 
-    override fun onResponse(call: Call, response: Response) {
-        val body = response.body?.string() ?: return
-        val jsonArray = JSONArray(body)
-        val newCluster = StreamCluster()
+                is ViewState.Success<*> -> {
+                    val stash = it.getDataAs<TopChartStash>()
+                    streamCluster = stash[chartType]?.get(chartCategory)
 
-        for (i in 0 until jsonArray.length()) {
-            val item = jsonArray.getJSONObject(i)
-            val customApp = App().apply {
-                id = i.toLong() // المُعرف المطلوب للـ Epoxy
-                packageName = item.getString("package")
-                // ملاحظة: Aurora يستخدم displayName للعنوان في هذا الموديل
-                displayName = item.getString("name") 
-                iconUrl = item.getString("icon")
-                versionName = item.getString("version")
-                downloadUrl = item.getString("download_url")
-            }
-            newCluster.clusterAppList.add(customApp)
-        }
+                    updateController(streamCluster)
+                }
 
-        activity?.runOnUiThread {
-            streamCluster = newCluster
-            updateController(streamCluster)
-        }
-        
                 else -> {}
+            }
         }
     }
 
@@ -160,3 +139,4 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
             }
         }
     }
+}
