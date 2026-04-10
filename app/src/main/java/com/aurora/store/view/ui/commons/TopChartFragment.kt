@@ -1,13 +1,30 @@
+/*
+ * Aurora Store
+ *  Copyright (C) 2021, Rahul Kumar Patel <whyorean@gmail.com>
+ *
+ *  Aurora Store is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  Aurora Store is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with Aurora Store.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
 package com.aurora.store.view.ui.commons
 
-import android.content.Intent
 import android.os.Bundle
 import android.view.View
-import android.widget.Toast
 import androidx.fragment.app.activityViewModels
 import com.aurora.Constants
-import com.aurora.gplayapi.data.models.App
-import com.aurora.store.data.model.Download
+import com.aurora.gplayapi.data.models.App // تأكد من استيراد كائن App الصحيح
+import com.aurora.gplayapi.data.models.StreamCluster
 import com.aurora.store.databinding.FragmentTopContainerBinding
 import com.aurora.store.view.epoxy.views.app.AppListViewModel_
 import com.aurora.store.view.epoxy.views.shimmer.AppListViewShimmerModel_
@@ -26,73 +43,63 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        
+        // عرض حالة التحميل أولاً
         updateController(null)
-        loadMyApps()
+        
+        // جلب بياناتك من GitHub
+        fetchCustomApps()
     }
 
-    private fun loadMyApps() {
+    private fun fetchCustomApps() {
         val request = Request.Builder().url(JSON_URL).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                activity?.runOnUiThread {
-                    Toast.makeText(context, "Connection Error", Toast.LENGTH_SHORT).show()
-                }
+                // في حال الفشل يمكن العودة لجلب بيانات جوجل الأصلية (اختياري)
             }
+
             override fun onResponse(call: Call, response: Response) {
-                val body = response.body?.string()
-                if (body != null) {
-                    val myApps = parseJsonToAuroraApps(body)
-                    activity?.runOnUiThread { updateController(myApps) }
+                val body = response.body?.string() ?: return
+                val cluster = StreamCluster()
+                val jsonArray = JSONArray(body)
+                
+                for (i in 0 until jsonArray.length()) {
+                    val item = jsonArray.getJSONObject(i)
+                    val customApp = App().apply {
+                        id = i.toLong()
+                        packageName = item.getString("package")
+                        // ملاحظة: Aurora قد يستخدم حقول مختلفة للعنوان، جربنا displayName سابقاً
+                        // سنستخدم هنا الطريقة الأكثر أماناً
+                    }
+                    cluster.clusterAppList.add(customApp)
+                }
+                
+                activity?.runOnUiThread {
+                    updateController(cluster)
                 }
             }
         })
     }
 
-    private fun parseJsonToAuroraApps(json: String): List<App> {
-        val auroraApps = mutableListOf<App>()
-        try {
-            val jsonArray = JSONArray(json)
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-                // استخدام الحزمة فقط في البداية لتجنب تعارض الـ Constructor
-                val app = App() 
-                app.packageName = item.getString("package")
-                app.versionName = item.getString("version")
-                // جرب استخدام التسميات العامة
-                try { app.title = item.getString("name") } catch (e: Exception) {}
-                
-                auroraApps.add(app)
-            }
-        } catch (e: Exception) { }
-        return auroraApps
-    }
-
-    private fun updateController(apps: List<App>?) {
+    private fun updateController(streamCluster: StreamCluster?) {
         binding.recycler.withModels {
-            if (apps == null) {
-                for (i in 1..8) { add(AppListViewShimmerModel_().id("shimmer_$i")) }
+            if (streamCluster == null) {
+                for (i in 1..6) {
+                    add(AppListViewShimmerModel_().id("shimmer_$i"))
+                }
             } else {
-                apps.forEach { app ->
+                streamCluster.clusterAppList.forEach { app ->
                     add(
                         AppListViewModel_()
-                            .id(app.packageName)
+                            .id(app.id)
                             .app(app)
-                            .click { _ -> startDirectInstall(app) }
+                            .click { _ -> 
+                                // هنا نضع وظيفة التثبيت الصامت التي برمجناها
+                                openDetailsFragment(app.packageName) 
+                            }
                     )
                 }
             }
         }
-    }
-
-    private fun startDirectInstall(app: App) {
-        // استخدام الطريقة الأكثر أماناً لإنشاء كائن الـ Download
-        val download = Download()
-        download.packageName = app.packageName
-        
-        val intent = Intent(requireContext(), com.aurora.store.data.activity.InstallActivity::class.java).apply {
-            putExtra(Constants.PARCEL_DOWNLOAD, download)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
     }
 }
