@@ -35,13 +35,13 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 activity?.runOnUiThread {
-                    Toast.makeText(context, "فشل جلب البيانات", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Connection Error", Toast.LENGTH_SHORT).show()
                 }
             }
-
             override fun onResponse(call: Call, response: Response) {
-                response.body?.string()?.let { jsonString ->
-                    val myApps = parseJsonToAuroraApps(jsonString)
+                val body = response.body?.string()
+                if (body != null) {
+                    val myApps = parseJsonToAuroraApps(body)
                     activity?.runOnUiThread { updateController(myApps) }
                 }
             }
@@ -54,17 +54,16 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
             val jsonArray = JSONArray(json)
             for (i in 0 until jsonArray.length()) {
                 val item = jsonArray.getJSONObject(i)
-                // إنشاء كائن App مع تمرير قيم افتراضية لتفادي أخطاء الـ Constructor
-                val app = App(
-                    packageName = item.getString("package"),
-                    displayName = item.getString("name"), // Aurora يستخدم displayName بدلاً من title أحياناً
-                    iconUrl = item.getString("icon"),
-                    versionName = item.getString("version"),
-                    downloadUrl = item.getString("download_url")
-                )
+                // استخدام الحزمة فقط في البداية لتجنب تعارض الـ Constructor
+                val app = App() 
+                app.packageName = item.getString("package")
+                app.versionName = item.getString("version")
+                // جرب استخدام التسميات العامة
+                try { app.title = item.getString("name") } catch (e: Exception) {}
+                
                 auroraApps.add(app)
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) { }
         return auroraApps
     }
 
@@ -86,18 +85,10 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
     }
 
     private fun startDirectInstall(app: App) {
-        activity?.runOnUiThread {
-            Toast.makeText(context, "بدأ التحميل: ${app.displayName}", Toast.LENGTH_LONG).show()
-        }
-
-        // إنشاء كائن Download وتعبئته بالبيانات المطلوبة
-        val download = Download().apply {
-            this.packageName = app.packageName
-            this.downloadUrl = app.downloadUrl
-            this.name = app.displayName
-            this.iconUrl = app.iconUrl
-        }
-
+        // استخدام الطريقة الأكثر أماناً لإنشاء كائن الـ Download
+        val download = Download()
+        download.packageName = app.packageName
+        
         val intent = Intent(requireContext(), com.aurora.store.data.activity.InstallActivity::class.java).apply {
             putExtra(Constants.PARCEL_DOWNLOAD, download)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
