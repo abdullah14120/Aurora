@@ -23,69 +23,98 @@ import android.os.Bundle
 import android.view.View
 import androidx.fragment.app.activityViewModels
 import com.aurora.Constants
-import com.aurora.gplayapi.data.models.App // تأكد من استيراد كائن App الصحيح
 import com.aurora.gplayapi.data.models.StreamCluster
+import com.aurora.gplayapi.helpers.contracts.TopChartsContract.Chart
+import com.aurora.gplayapi.helpers.contracts.TopChartsContract.Type
+import com.aurora.store.TopChartStash
+import com.aurora.store.data.model.ViewState
+import com.aurora.store.data.model.ViewState.Empty.getDataAs
 import com.aurora.store.databinding.FragmentTopContainerBinding
+import com.aurora.store.view.custom.recycler.EndlessRecyclerOnScrollListener
+import com.aurora.store.view.epoxy.views.AppProgressViewModel_
 import com.aurora.store.view.epoxy.views.app.AppListViewModel_
 import com.aurora.store.view.epoxy.views.shimmer.AppListViewShimmerModel_
 import com.aurora.store.viewmodel.topchart.TopChartViewModel
 import dagger.hilt.android.AndroidEntryPoint
-import okhttp3.*
-import org.json.JSONArray
-import java.io.IOException
 
 @AndroidEntryPoint
 class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
 
     private val viewModel: TopChartViewModel by activityViewModels()
-    private val client = OkHttpClient()
-    private val JSON_URL = "https://raw.githubusercontent.com/abdullah14120/Update/main/apps.json"
+
+    private var streamCluster: StreamCluster? = StreamCluster()
+
+    companion object {
+        @JvmStatic
+        fun newInstance(chartType: Int, chartCategory: Int): TopChartFragment =
+            TopChartFragment().apply {
+                arguments = Bundle().apply {
+                    putInt(Constants.TOP_CHART_TYPE, chartType)
+                    putInt(Constants.TOP_CHART_CATEGORY, chartCategory)
+                }
+            }
+    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        
-        // عرض حالة التحميل أولاً
-        updateController(null)
-        
-        // جلب بياناتك من GitHub
-        fetchCustomApps()
-    }
 
-    private fun fetchCustomApps() {
-        val request = Request.Builder().url(JSON_URL).build()
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                // في حال الفشل يمكن العودة لجلب بيانات جوجل الأصلية (اختياري)
-            }
+        var type = 0
+        var category = 0
+        val bundle = arguments
 
-            override fun onResponse(call: Call, response: Response) {
-                val body = response.body?.string() ?: return
-                val cluster = StreamCluster()
-                val jsonArray = JSONArray(body)
-                
-                for (i in 0 until jsonArray.length()) {
-                    val item = jsonArray.getJSONObject(i)
-                    val customApp = App().apply {
-                        id = i.toLong()
-                        packageName = item.getString("package")
-                        // ملاحظة: Aurora قد يستخدم حقول مختلفة للعنوان، جربنا displayName سابقاً
-                        // سنستخدم هنا الطريقة الأكثر أماناً
-                    }
-                    cluster.clusterAppList.add(customApp)
-                }
-                
-                activity?.runOnUiThread {
-                    updateController(cluster)
-                }
+        if (bundle != null) {
+            type = bundle.getInt(Constants.TOP_CHART_TYPE, 0)
+            category = bundle.getInt(Constants.TOP_CHART_CATEGORY, 0)
+        }
+
+        val chartType = when (type) {
+            1 -> Type.GAME
+            else -> Type.APPLICATION
+        }
+
+        val chartCategory = when (category) {
+            1 -> Chart.TOP_GROSSING
+            2 -> Chart.MOVERS_SHAKERS
+            3 -> Chart.TOP_SELLING_PAID
+            else -> Chart.TOP_SELLING_FREE
+        }
+
+        binding.recycler.addOnScrollListener(object : EndlessRecyclerOnScrollListener() {
+            override fun onLoadMore(currentPage: Int) {
+                viewModel.nextCluster(chartType, chartCategory)
             }
         })
+
+        updateController(null)
+
+        viewModel.getStreamCluster(chartType, chartCategory)
+        viewModel.liveData.observe(viewLifecycleOwner) {
+            when (it) {
+                is ViewState.Loading, is ViewState.Error -> {
+                    updateController(null)
+                }
+
+                is ViewState.Success<*> -> {
+                    val stash = it.getDataAs<TopChartStash>()
+                    streamCluster = stash[chartType]?.get(chartCategory)
+
+                    updateController(streamCluster)
+                }
+
+                else -> {}
+            }
+        }
     }
 
     private fun updateController(streamCluster: StreamCluster?) {
         binding.recycler.withModels {
+            setFilterDuplicates(true)
             if (streamCluster == null) {
                 for (i in 1..6) {
-                    add(AppListViewShimmerModel_().id("shimmer_$i"))
+                    add(
+                        AppListViewShimmerModel_()
+                            .id(i)
+                    )
                 }
             } else {
                 streamCluster.clusterAppList.forEach { app ->
@@ -93,10 +122,14 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
                         AppListViewModel_()
                             .id(app.id)
                             .app(app)
-                            .click { _ -> 
-                                // هنا نضع وظيفة التثبيت الصامت التي برمجناها
-                                openDetailsFragment(app.packageName) 
-                            }
+                            .click { _ -> openDetailsFragment(app.packageName) }
+                    )
+                }
+
+                if (streamCluster.hasNext()) {
+                    add(
+                        AppProgressViewModel_()
+                            .id("progress")
                     )
                 }
             }
