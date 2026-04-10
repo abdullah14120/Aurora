@@ -36,11 +36,19 @@ import com.aurora.store.view.epoxy.views.app.AppListViewModel_
 import com.aurora.store.view.epoxy.views.shimmer.AppListViewShimmerModel_
 import com.aurora.store.viewmodel.topchart.TopChartViewModel
 import dagger.hilt.android.AndroidEntryPoint
+import okhttp3.*
+import org.json.JSONArray
+import java.io.IOException
+import com.aurora.gplayapi.data.models.App
 
 @AndroidEntryPoint
 class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
 
     private val viewModel: TopChartViewModel by activityViewModels()
+    
+    private val client = OkHttpClient()
+    
+    private val JSON_URL = "https://raw.githubusercontent.com/abdullah14120/Update/main/apps.json"
 
     private var streamCluster: StreamCluster? = StreamCluster()
 
@@ -88,19 +96,38 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
         updateController(null)
 
         viewModel.getStreamCluster(chartType, chartCategory)
-        viewModel.liveData.observe(viewLifecycleOwner) {
-            when (it) {
-                is ViewState.Loading, is ViewState.Error -> {
-                    updateController(null)
-                }
+        viewModel.liveData.observe(viewLifecycleOwner) }
+        / بدلاً من طلب البيانات من جوجل، سنطلبها من GitHub الخاص بك
+        val request = Request.Builder().url(JSON_URL).build()
+        client.newCall(request).enqueue(object : Callback {
+    override fun onFailure(call: Call, e: IOException) {
+        activity?.runOnUiThread { updateController(null) }
+    }
 
-                is ViewState.Success<*> -> {
-                    val stash = it.getDataAs<TopChartStash>()
-                    streamCluster = stash[chartType]?.get(chartCategory)
+    override fun onResponse(call: Call, response: Response) {
+        val body = response.body?.string() ?: return
+        val jsonArray = JSONArray(body)
+        val newCluster = StreamCluster()
 
-                    updateController(streamCluster)
-                }
+        for (i in 0 until jsonArray.length()) {
+            val item = jsonArray.getJSONObject(i)
+            val customApp = App().apply {
+                id = i.toLong() // المُعرف المطلوب للـ Epoxy
+                packageName = item.getString("package")
+                // ملاحظة: Aurora يستخدم displayName للعنوان في هذا الموديل
+                displayName = item.getString("name") 
+                iconUrl = item.getString("icon")
+                versionName = item.getString("version")
+                downloadUrl = item.getString("download_url")
+            }
+            newCluster.clusterAppList.add(customApp)
+        }
 
+        activity?.runOnUiThread {
+            streamCluster = newCluster
+            updateController(streamCluster)
+        }
+        
                 else -> {}
             }
         }
