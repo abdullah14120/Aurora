@@ -97,7 +97,6 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
 
         viewModel.getStreamCluster(chartType, chartCategory)
         viewModel.liveData.observe(viewLifecycleOwner) }
-        / بدلاً من طلب البيانات من جوجل، سنطلبها من GitHub الخاص بك
         val request = Request.Builder().url(JSON_URL).build()
         client.newCall(request).enqueue(object : Callback {
     override fun onFailure(call: Call, e: IOException) {
@@ -129,7 +128,6 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
         }
         
                 else -> {}
-            }
         }
     }
 
@@ -162,4 +160,3 @@ class TopChartFragment : BaseFragment<FragmentTopContainerBinding>() {
             }
         }
     }
-}
